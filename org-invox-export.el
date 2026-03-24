@@ -1,9 +1,9 @@
-;;; org-invoice-export.el --- PDF export for org-invoice -*- lexical-binding: t -*-
+;;; org-invox-export.el --- PDF export for org-invox -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Manu Narayanan
 
 ;; Author: Manu Narayanan
-;; URL: https://github.com/manu-r-n/org-invoice
+;; URL: https://github.com/manu-r-n/org-invox
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1") (org "9.0"))
 
@@ -16,21 +16,21 @@
 
 ;;; Commentary:
 
-;; Provides PDF export functionality for org-invoice.
+;; Provides PDF export functionality for org-invox.
 ;; Generates professional invoices via LaTeX/pdflatex.
 
 ;;; Code:
 
-(require 'org-invoice)
+(require 'org-invox)
 
-(defun org-invoice-export--read-field (field-name)
+(defun org-invox-export--read-field (field-name)
   "Read FIELD-NAME value from the current invoice buffer's org tables."
   (save-excursion
     (goto-char (point-min))
     (when (re-search-forward (format "^#\\+%s: \\(.+\\)$" (upcase field-name)) nil t)
       (string-trim (match-string 1)))))
 
-(defun org-invoice-export--read-table-field (heading field)
+(defun org-invox-export--read-table-field (heading field)
   "Read FIELD value from the org table under HEADING."
   (save-excursion
     (goto-char (point-min))
@@ -43,22 +43,22 @@
             (when (string-match (format "| %s *| \\([^|]+\\)|" (regexp-quote field)) table-text)
               (string-trim (match-string 1 table-text)))))))))
 
-(defun org-invoice-export--parse-invoice ()
+(defun org-invox-export--parse-invoice ()
   "Parse the current invoice buffer into a property list."
   (let ((props '()))
     ;; File-level properties
     (dolist (key '("INVOICE_NUMBER" "INVOICE_DATE" "DUE_DATE" "STATUS"))
-      (let ((val (org-invoice-export--read-field key)))
+      (let ((val (org-invox-export--read-field key)))
         (when val (setq props (plist-put props (intern (concat ":" (downcase key))) val)))))
     ;; From details
     (dolist (field '("Name" "Company" "Address" "Email" "Phone"))
-      (let ((val (org-invoice-export--read-table-field "From" field)))
+      (let ((val (org-invox-export--read-table-field "From" field)))
         (when val (setq props (plist-put props
                                         (intern (concat ":from-" (downcase field)))
                                         val)))))
     ;; To details
     (dolist (field '("Name" "Company" "Address" "Email" "Contact"))
-      (let ((val (org-invoice-export--read-table-field "To" field)))
+      (let ((val (org-invox-export--read-table-field "To" field)))
         (when val (setq props (plist-put props
                                         (intern (concat ":to-" (downcase field)))
                                         val)))))
@@ -122,7 +122,7 @@
                                              (point) (line-end-position)))))))
     props))
 
-(defun org-invoice-export--latex-escape (str)
+(defun org-invox-export--latex-escape (str)
   "Escape special LaTeX characters in STR."
   (if (null str) ""
     (let ((result str))
@@ -139,7 +139,7 @@
         (setq result (replace-regexp-in-string (car pair) (cdr pair) result t t)))
       result)))
 
-(defun org-invoice-export--default-template ()
+(defun org-invox-export--default-template ()
   "Return the default LaTeX template as a string."
   "\\documentclass[11pt,letterpaper]{article}
 \\usepackage[letterpaper,margin=1in]{geometry}
@@ -241,10 +241,10 @@
 \\end{document}
 ")
 
-(defun org-invoice-export--fill-template (template props)
+(defun org-invox-export--fill-template (template props)
   "Fill TEMPLATE with values from PROPS."
   (let ((result template)
-        (esc #'org-invoice-export--latex-escape))
+        (esc #'org-invox-export--latex-escape))
     ;; Simple replacements
     (dolist (mapping '(("<<INVOICE_NUMBER>>" . :invoice_number)
                        ("<<INVOICE_DATE>>" . :invoice_date)
@@ -273,7 +273,7 @@
                       result t t))))
     ;; Currency symbol (don't escape the $)
     (let ((sym (or (plist-get props :currency-symbol)
-                   org-invoice-default-currency-symbol)))
+                   org-invox-default-currency-symbol)))
       (setq result (replace-regexp-in-string
                     (regexp-quote "<<CURRENCY_SYM>>")
                     (if (string= sym "$") "\\$" (funcall esc sym))
@@ -295,19 +295,19 @@
     result))
 
 ;;;###autoload
-(defun org-invoice-export-pdf ()
+(defun org-invox-export-pdf ()
   "Export the current invoice buffer to PDF via LaTeX."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
-  (let* ((props (org-invoice-export--parse-invoice))
-         (template (if (and org-invoice-latex-template-file
-                            (file-exists-p org-invoice-latex-template-file))
+  (let* ((props (org-invox-export--parse-invoice))
+         (template (if (and org-invox-latex-template-file
+                            (file-exists-p org-invox-latex-template-file))
                        (with-temp-buffer
-                         (insert-file-contents org-invoice-latex-template-file)
+                         (insert-file-contents org-invox-latex-template-file)
                          (buffer-string))
-                     (org-invoice-export--default-template)))
-         (filled (org-invoice-export--fill-template template props))
+                     (org-invox-export--default-template)))
+         (filled (org-invox-export--fill-template template props))
          (org-file (buffer-file-name))
          (base-name (file-name-sans-extension org-file))
          (tex-file (concat base-name ".tex"))
@@ -335,5 +335,5 @@
             (org-open-file pdf-file)))
       (user-error "PDF compilation failed. Check that pdflatex is installed"))))
 
-(provide 'org-invoice-export)
-;;; org-invoice-export.el ends here
+(provide 'org-invox-export)
+;;; org-invox-export.el ends here

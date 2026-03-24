@@ -2,7 +2,7 @@
 
 EMACS ?= emacs
 
-SRCS = org-invoice.el org-invoice-export.el
+SRCS = org-invox.el org-invox-export.el
 
 all: compile
 
@@ -15,7 +15,7 @@ clean:
 
 test:
 	$(EMACS) -Q -batch -L . \
-		-l org-invoice.el \
-		-l org-invoice-export.el \
-		-l test/org-invoice-test.el \
+		-l org-invox.el \
+		-l org-invox-export.el \
+		-l test/org-invox-test.el \
 		-f ert-run-tests-batch-and-exit

@@ -1,9 +1,9 @@
-;;; org-invoice.el --- Invoice management for contractors using Org mode -*- lexical-binding: t -*-
+;;; org-invox.el --- Invoice management for contractors using Org mode -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Manu Narayanan
 
 ;; Author: Manu Narayanan
-;; URL: https://github.com/manu-r-n/org-invoice
+;; URL: https://github.com/manu-r-n/org-invox
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1") (org "9.0"))
 ;; Keywords: org, invoice, billing, contractor
@@ -25,7 +25,7 @@
 
 ;;; Commentary:
 
-;; org-invoice provides a complete invoicing workflow for software
+;; org-invox provides a complete invoicing workflow for software
 ;; contractors and freelancers using Org mode.
 ;;
 ;; Features:
@@ -40,22 +40,22 @@
 ;; Quick Start:
 ;;
 ;;   1. Configure your business details:
-;;      (setq org-invoice-from-name "Your Name"
-;;            org-invoice-from-company "Your Company"
-;;            org-invoice-from-address "Your Address"
-;;            org-invoice-from-email "you@example.com")
+;;      (setq org-invox-from-name "Your Name"
+;;            org-invox-from-company "Your Company"
+;;            org-invox-from-address "Your Address"
+;;            org-invox-from-email "you@example.com")
 ;;
 ;;   2. Create a new contract:
-;;      M-x org-invoice-new-contract
+;;      M-x org-invox-new-contract
 ;;
 ;;   3. Create an invoice:
-;;      M-x org-invoice-create
+;;      M-x org-invox-create
 ;;
 ;;   4. Export to PDF:
-;;      M-x org-invoice-export-pdf
+;;      M-x org-invox-export-pdf
 ;;
 ;;   5. Mark as paid:
-;;      M-x org-invoice-mark-paid
+;;      M-x org-invox-mark-paid
 
 ;;; Code:
 
@@ -64,73 +64,73 @@
 
 ;;; Customization Group
 
-(defgroup org-invoice nil
+(defgroup org-invox nil
   "Invoice management for contractors using Org mode."
   :group 'org
-  :prefix "org-invoice-")
+  :prefix "org-invox-")
 
 ;;; Business Details (From)
 
-(defcustom org-invoice-from-name ""
+(defcustom org-invox-from-name ""
   "Your full name for invoices."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-from-company ""
+(defcustom org-invox-from-company ""
   "Your company/business name for invoices.
 Leave empty if operating under personal name."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-from-address ""
+(defcustom org-invox-from-address ""
   "Your business address for invoices.
 Use \\n for line breaks."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-from-email ""
+(defcustom org-invox-from-email ""
   "Your business email for invoices."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-from-phone ""
+(defcustom org-invox-from-phone ""
   "Your business phone for invoices."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
 ;;; Invoice Defaults
 
-(defcustom org-invoice-root-directory "~/invoices"
+(defcustom org-invox-root-directory "~/invoices"
   "Root directory for all invoice contracts and files."
   :type 'directory
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-default-tax-rate 13.0
+(defcustom org-invox-default-tax-rate 13.0
   "Default tax rate as a percentage (e.g., 13.0 for 13% HST)."
   :type 'float
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-default-tax-label "HST"
+(defcustom org-invox-default-tax-label "HST"
   "Default label for the tax (e.g., HST, GST, VAT, Sales Tax)."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-default-payment-terms "Net 30"
+(defcustom org-invox-default-payment-terms "Net 30"
   "Default payment terms (e.g., Net 15, Net 30, Due on Receipt)."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-default-currency "CAD"
+(defcustom org-invox-default-currency "CAD"
   "Default currency code for invoices."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-default-currency-symbol "$"
+(defcustom org-invox-default-currency-symbol "$"
   "Default currency symbol for display."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-number-format "INV-%Y-%04d"
+(defcustom org-invox-number-format "INV-%Y-%04d"
   "Format string for invoice numbers.
 %Y is replaced with the 4-digit year.
 %04d is replaced with the zero-padded sequence number.
@@ -139,43 +139,43 @@ Examples:
   \"INV-%04d\"     => INV-0001
   \"%Y%02d\"       => 202601"
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-latex-template-file nil
+(defcustom org-invox-latex-template-file nil
   "Path to a custom LaTeX template file.
 If nil, the built-in template is used."
   :type '(choice (const :tag "Built-in template" nil)
                  (file :tag "Custom template file"))
-  :group 'org-invoice)
+  :group 'org-invox)
 
-(defcustom org-invoice-date-format "%B %d, %Y"
+(defcustom org-invox-date-format "%B %d, %Y"
   "Format string for dates on invoices (e.g., \"March 15, 2026\")."
   :type 'string
-  :group 'org-invoice)
+  :group 'org-invox)
 
 ;;; Internal Functions
 
-(defun org-invoice--ensure-root ()
+(defun org-invox--ensure-root ()
   "Ensure the invoice root directory exists."
-  (let ((dir (expand-file-name org-invoice-root-directory)))
+  (let ((dir (expand-file-name org-invox-root-directory)))
     (unless (file-directory-p dir)
       (make-directory dir t))
     dir))
 
-(defun org-invoice--contract-dir (slug)
+(defun org-invox--contract-dir (slug)
   "Return the contract directory for SLUG."
-  (expand-file-name slug (org-invoice--ensure-root)))
+  (expand-file-name slug (org-invox--ensure-root)))
 
-(defun org-invoice--index-file (slug)
+(defun org-invox--index-file (slug)
   "Return the index.org path for contract SLUG."
-  (expand-file-name "index.org" (org-invoice--contract-dir slug)))
+  (expand-file-name "index.org" (org-invox--contract-dir slug)))
 
-(defun org-invoice--slugify (name)
+(defun org-invox--slugify (name)
   "Convert NAME into a filesystem-safe slug."
   (let ((slug (downcase (replace-regexp-in-string "[^a-zA-Z0-9]+" "-" name))))
     (replace-regexp-in-string "^-\\|-$" "" slug)))
 
-(defun org-invoice--read-index-property (index-file property)
+(defun org-invox--read-index-property (index-file property)
   "Read a PROPERTY from the top-level heading in INDEX-FILE."
   (with-temp-buffer
     (insert-file-contents index-file)
@@ -184,7 +184,7 @@ If nil, the built-in template is used."
     (when (re-search-forward (format "^#\\+%s:" (upcase property)) nil t)
       (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
 
-(defun org-invoice--read-contract-property (index-file property)
+(defun org-invox--read-contract-property (index-file property)
   "Read a PROPERTY from the Contract Details heading in INDEX-FILE."
   (with-temp-buffer
     (insert-file-contents index-file)
@@ -193,13 +193,13 @@ If nil, the built-in template is used."
     (when (re-search-forward "^\\* Contract Details" nil t)
       (org-entry-get (point) property))))
 
-(defun org-invoice--next-invoice-number (index-file)
+(defun org-invox--next-invoice-number (index-file)
   "Get the next invoice number from INDEX-FILE and increment it."
   (let* ((next-num (string-to-number
-                    (or (org-invoice--read-index-property index-file "NEXT_INVOICE_NUM")
+                    (or (org-invox--read-index-property index-file "NEXT_INVOICE_NUM")
                         "1")))
          (year (format-time-string "%Y"))
-         (fmt org-invoice-number-format)
+         (fmt org-invox-number-format)
          (invoice-number (replace-regexp-in-string
                           "%Y" year
                           (replace-regexp-in-string
@@ -217,40 +217,40 @@ If nil, the built-in template is used."
       (save-buffer))
     invoice-number))
 
-(defun org-invoice--list-contracts ()
+(defun org-invox--list-contracts ()
   "Return a list of (name . slug) for all contracts."
-  (let ((root (org-invoice--ensure-root))
+  (let ((root (org-invox--ensure-root))
         contracts)
     (dolist (dir (directory-files root t "^[^.]"))
       (when (and (file-directory-p dir)
                  (file-exists-p (expand-file-name "index.org" dir)))
         (let* ((index (expand-file-name "index.org" dir))
-               (name (or (org-invoice--read-index-property index "TITLE")
+               (name (or (org-invox--read-index-property index "TITLE")
                          (file-name-nondirectory dir))))
           (push (cons name (file-name-nondirectory dir)) contracts))))
     (nreverse contracts)))
 
-(defun org-invoice--select-contract ()
+(defun org-invox--select-contract ()
   "Prompt user to select a contract.  Return (name . slug)."
-  (let ((contracts (org-invoice--list-contracts)))
+  (let ((contracts (org-invox--list-contracts)))
     (unless contracts
-      (user-error "No contracts found. Create one with `org-invoice-new-contract'"))
+      (user-error "No contracts found. Create one with `org-invox-new-contract'"))
     (let* ((names (mapcar #'car contracts))
            (choice (completing-read "Select contract: " names nil t)))
       (assoc choice contracts))))
 
-(defun org-invoice--compute-totals (hours rate tax-rate)
+(defun org-invox--compute-totals (hours rate tax-rate)
   "Compute subtotal, tax, and total from HOURS, RATE, and TAX-RATE."
   (let* ((subtotal (* hours rate))
          (tax (* subtotal (/ tax-rate 100.0)))
          (total (+ subtotal tax)))
     (list :subtotal subtotal :tax tax :total total)))
 
-(defun org-invoice--format-date (time)
-  "Format TIME using `org-invoice-date-format'."
-  (format-time-string org-invoice-date-format time))
+(defun org-invox--format-date (time)
+  "Format TIME using `org-invox-date-format'."
+  (format-time-string org-invox-date-format time))
 
-(defun org-invoice--add-to-index (index-file invoice-number invoice-file
+(defun org-invox--add-to-index (index-file invoice-number invoice-file
                                              period-start period-end total status)
   "Add an invoice entry to INDEX-FILE."
   (with-current-buffer (find-file-noselect index-file)
@@ -282,7 +282,7 @@ If nil, the built-in template is used."
 ;;; Interactive Commands
 
 ;;;###autoload
-(defun org-invoice-new-contract ()
+(defun org-invox-new-contract ()
   "Create a new contract with client details."
   (interactive)
   (let* ((client-name (read-string "Client/Company name: "))
@@ -292,14 +292,14 @@ If nil, the built-in template is used."
          (service-desc (read-string "Service description (e.g., Software Development Services): "
                                     "Software Development Services"))
          (rate (read-number "Hourly rate: "))
-         (currency (read-string "Currency code: " org-invoice-default-currency))
-         (currency-sym (read-string "Currency symbol: " org-invoice-default-currency-symbol))
-         (tax-rate (read-number "Tax rate (%): " org-invoice-default-tax-rate))
-         (tax-label (read-string "Tax label: " org-invoice-default-tax-label))
-         (payment-terms (read-string "Payment terms: " org-invoice-default-payment-terms))
-         (slug (org-invoice--slugify client-name))
-         (contract-dir (org-invoice--contract-dir slug))
-         (index-file (org-invoice--index-file slug)))
+         (currency (read-string "Currency code: " org-invox-default-currency))
+         (currency-sym (read-string "Currency symbol: " org-invox-default-currency-symbol))
+         (tax-rate (read-number "Tax rate (%): " org-invox-default-tax-rate))
+         (tax-label (read-string "Tax label: " org-invox-default-tax-label))
+         (payment-terms (read-string "Payment terms: " org-invox-default-payment-terms))
+         (slug (org-invox--slugify client-name))
+         (contract-dir (org-invox--contract-dir slug))
+         (index-file (org-invox--index-file slug)))
     (when (file-exists-p index-file)
       (user-error "Contract '%s' already exists at %s" client-name contract-dir))
     (make-directory contract-dir t)
@@ -340,46 +340,46 @@ If nil, the built-in template is used."
     (message "Contract created for '%s' at %s" client-name contract-dir)))
 
 ;;;###autoload
-(defun org-invoice-create ()
+(defun org-invox-create ()
   "Create a new invoice for a contract."
   (interactive)
-  (let* ((contract (org-invoice--select-contract))
+  (let* ((contract (org-invox--select-contract))
          (slug (cdr contract))
-         (index-file (org-invoice--index-file slug))
+         (index-file (org-invox--index-file slug))
          ;; Read contract properties
-         (client-name (org-invoice--read-contract-property index-file "CLIENT_NAME"))
-         (client-address (org-invoice--read-contract-property index-file "CLIENT_ADDRESS"))
-         (client-email (org-invoice--read-contract-property index-file "CLIENT_EMAIL"))
-         (contact-name (org-invoice--read-contract-property index-file "CONTACT_NAME"))
-         (service-desc (org-invoice--read-contract-property index-file "SERVICE_DESCRIPTION"))
-         (rate (string-to-number (org-invoice--read-contract-property index-file "RATE")))
-         (currency (or (org-invoice--read-contract-property index-file "CURRENCY")
-                       org-invoice-default-currency))
-         (currency-sym (or (org-invoice--read-contract-property index-file "CURRENCY_SYMBOL")
-                           org-invoice-default-currency-symbol))
+         (client-name (org-invox--read-contract-property index-file "CLIENT_NAME"))
+         (client-address (org-invox--read-contract-property index-file "CLIENT_ADDRESS"))
+         (client-email (org-invox--read-contract-property index-file "CLIENT_EMAIL"))
+         (contact-name (org-invox--read-contract-property index-file "CONTACT_NAME"))
+         (service-desc (org-invox--read-contract-property index-file "SERVICE_DESCRIPTION"))
+         (rate (string-to-number (org-invox--read-contract-property index-file "RATE")))
+         (currency (or (org-invox--read-contract-property index-file "CURRENCY")
+                       org-invox-default-currency))
+         (currency-sym (or (org-invox--read-contract-property index-file "CURRENCY_SYMBOL")
+                           org-invox-default-currency-symbol))
          (tax-rate (string-to-number
-                    (or (org-invoice--read-contract-property index-file "TAX_RATE")
-                        (number-to-string org-invoice-default-tax-rate))))
-         (tax-label (or (org-invoice--read-contract-property index-file "TAX_LABEL")
-                        org-invoice-default-tax-label))
-         (payment-terms (or (org-invoice--read-contract-property index-file "PAYMENT_TERMS")
-                            org-invoice-default-payment-terms))
+                    (or (org-invox--read-contract-property index-file "TAX_RATE")
+                        (number-to-string org-invox-default-tax-rate))))
+         (tax-label (or (org-invox--read-contract-property index-file "TAX_LABEL")
+                        org-invox-default-tax-label))
+         (payment-terms (or (org-invox--read-contract-property index-file "PAYMENT_TERMS")
+                            org-invox-default-payment-terms))
          ;; Prompt for variable fields
          (hours (read-number "Hours worked: "))
          (period-start (org-read-date nil nil nil "Period start: "))
          (period-end (org-read-date nil nil nil "Period end: "))
          ;; Compute
-         (totals (org-invoice--compute-totals hours rate tax-rate))
+         (totals (org-invox--compute-totals hours rate tax-rate))
          (subtotal (plist-get totals :subtotal))
          (tax (plist-get totals :tax))
          (total (plist-get totals :total))
          ;; Invoice number and file
-         (invoice-number (org-invoice--next-invoice-number index-file))
+         (invoice-number (org-invox--next-invoice-number index-file))
          (invoice-file (expand-file-name
                         (concat invoice-number ".org")
-                        (org-invoice--contract-dir slug)))
-         (invoice-date (org-invoice--format-date (current-time)))
-         (due-date (org-invoice--format-date
+                        (org-invox--contract-dir slug)))
+         (invoice-date (org-invox--format-date (current-time)))
+         (due-date (org-invox--format-date
                     (time-add (current-time)
                               (days-to-time
                                (cond
@@ -451,11 +451,11 @@ If nil, the built-in template is used."
                       period-end
                       payment-terms
                       ;; From
-                      org-invoice-from-name
-                      org-invoice-from-company
-                      org-invoice-from-address
-                      org-invoice-from-email
-                      org-invoice-from-phone
+                      org-invox-from-name
+                      org-invox-from-company
+                      org-invox-from-address
+                      org-invox-from-email
+                      org-invox-from-phone
                       ;; To
                       contact-name
                       client-name
@@ -473,14 +473,14 @@ If nil, the built-in template is used."
                       ;; Terms
                       payment-terms)))
     ;; Update the index
-    (org-invoice--add-to-index index-file invoice-number invoice-file
+    (org-invox--add-to-index index-file invoice-number invoice-file
                                period-start period-end total "Unpaid")
     ;; Open the invoice
     (find-file invoice-file)
     (message "Invoice %s created (Total: %s%.2f)" invoice-number currency-sym total)))
 
 ;;;###autoload
-(defun org-invoice-mark-paid ()
+(defun org-invox-mark-paid ()
   "Mark the current invoice buffer as paid."
   (interactive)
   (unless (derived-mode-p 'org-mode)
@@ -514,23 +514,23 @@ If nil, the built-in template is used."
   (message "Invoice marked as paid."))
 
 ;;;###autoload
-(defun org-invoice-open-contract ()
+(defun org-invox-open-contract ()
   "Open the index file for a contract."
   (interactive)
-  (let* ((contract (org-invoice--select-contract))
+  (let* ((contract (org-invox--select-contract))
          (slug (cdr contract))
-         (index-file (org-invoice--index-file slug)))
+         (index-file (org-invox--index-file slug)))
     (find-file index-file)))
 
 ;;;###autoload
-(defun org-invoice-list-unpaid ()
+(defun org-invox-list-unpaid ()
   "List all unpaid invoices across all contracts."
   (interactive)
-  (let ((contracts (org-invoice--list-contracts))
+  (let ((contracts (org-invox--list-contracts))
         (unpaid-list '()))
     (dolist (contract contracts)
       (let* ((slug (cdr contract))
-             (contract-dir (org-invoice--contract-dir slug)))
+             (contract-dir (org-invox--contract-dir slug)))
         (dolist (file (directory-files contract-dir t "\\.org$"))
           (unless (string= (file-name-nondirectory file) "index.org")
             (with-temp-buffer
@@ -559,5 +559,5 @@ If nil, the built-in template is used."
           (read-only-mode 1))
         (display-buffer buf)))))
 
-(provide 'org-invoice)
-;;; org-invoice.el ends here
+(provide 'org-invox)
+;;; org-invox.el ends here
