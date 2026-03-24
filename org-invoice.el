@@ -1,0 +1,563 @@
+;;; org-invoice.el --- Invoice management for contractors using Org mode -*- lexical-binding: t -*-
+
+;; Copyright (C) 2026 Manu Narayanan
+
+;; Author: Manu Narayanan
+;; URL: https://github.com/manu-r-n/org-invoice
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "27.1") (org "9.0"))
+;; Keywords: org, invoice, billing, contractor
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; org-invoice provides a complete invoicing workflow for software
+;; contractors and freelancers using Org mode.
+;;
+;; Features:
+;; - Contract-based invoice management (one contract per client)
+;; - Auto-incrementing invoice numbers with configurable format
+;; - Configurable tax rates (HST, GST, VAT, etc.) per contract
+;; - Configurable payment terms per contract
+;; - PDF export via LaTeX with a professional template
+;; - Plain Org records for bookkeeping
+;; - Master index file per contract with links to all invoices
+;;
+;; Quick Start:
+;;
+;;   1. Configure your business details:
+;;      (setq org-invoice-from-name "Your Name"
+;;            org-invoice-from-company "Your Company"
+;;            org-invoice-from-address "Your Address"
+;;            org-invoice-from-email "you@example.com")
+;;
+;;   2. Create a new contract:
+;;      M-x org-invoice-new-contract
+;;
+;;   3. Create an invoice:
+;;      M-x org-invoice-create
+;;
+;;   4. Export to PDF:
+;;      M-x org-invoice-export-pdf
+;;
+;;   5. Mark as paid:
+;;      M-x org-invoice-mark-paid
+
+;;; Code:
+
+(require 'org)
+(require 'cl-lib)
+
+;;; Customization Group
+
+(defgroup org-invoice nil
+  "Invoice management for contractors using Org mode."
+  :group 'org
+  :prefix "org-invoice-")
+
+;;; Business Details (From)
+
+(defcustom org-invoice-from-name ""
+  "Your full name for invoices."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-from-company ""
+  "Your company/business name for invoices.
+Leave empty if operating under personal name."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-from-address ""
+  "Your business address for invoices.
+Use \\n for line breaks."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-from-email ""
+  "Your business email for invoices."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-from-phone ""
+  "Your business phone for invoices."
+  :type 'string
+  :group 'org-invoice)
+
+;;; Invoice Defaults
+
+(defcustom org-invoice-root-directory "~/invoices"
+  "Root directory for all invoice contracts and files."
+  :type 'directory
+  :group 'org-invoice)
+
+(defcustom org-invoice-default-tax-rate 13.0
+  "Default tax rate as a percentage (e.g., 13.0 for 13% HST)."
+  :type 'float
+  :group 'org-invoice)
+
+(defcustom org-invoice-default-tax-label "HST"
+  "Default label for the tax (e.g., HST, GST, VAT, Sales Tax)."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-default-payment-terms "Net 30"
+  "Default payment terms (e.g., Net 15, Net 30, Due on Receipt)."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-default-currency "CAD"
+  "Default currency code for invoices."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-default-currency-symbol "$"
+  "Default currency symbol for display."
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-number-format "INV-%Y-%04d"
+  "Format string for invoice numbers.
+%Y is replaced with the 4-digit year.
+%04d is replaced with the zero-padded sequence number.
+Examples:
+  \"INV-%Y-%04d\"  => INV-2026-0001
+  \"INV-%04d\"     => INV-0001
+  \"%Y%02d\"       => 202601"
+  :type 'string
+  :group 'org-invoice)
+
+(defcustom org-invoice-latex-template-file nil
+  "Path to a custom LaTeX template file.
+If nil, the built-in template is used."
+  :type '(choice (const :tag "Built-in template" nil)
+                 (file :tag "Custom template file"))
+  :group 'org-invoice)
+
+(defcustom org-invoice-date-format "%B %d, %Y"
+  "Format string for dates on invoices (e.g., \"March 15, 2026\")."
+  :type 'string
+  :group 'org-invoice)
+
+;;; Internal Functions
+
+(defun org-invoice--ensure-root ()
+  "Ensure the invoice root directory exists."
+  (let ((dir (expand-file-name org-invoice-root-directory)))
+    (unless (file-directory-p dir)
+      (make-directory dir t))
+    dir))
+
+(defun org-invoice--contract-dir (slug)
+  "Return the contract directory for SLUG."
+  (expand-file-name slug (org-invoice--ensure-root)))
+
+(defun org-invoice--index-file (slug)
+  "Return the index.org path for contract SLUG."
+  (expand-file-name "index.org" (org-invoice--contract-dir slug)))
+
+(defun org-invoice--slugify (name)
+  "Convert NAME into a filesystem-safe slug."
+  (let ((slug (downcase (replace-regexp-in-string "[^a-zA-Z0-9]+" "-" name))))
+    (replace-regexp-in-string "^-\\|-$" "" slug)))
+
+(defun org-invoice--read-index-property (index-file property)
+  "Read a PROPERTY from the top-level heading in INDEX-FILE."
+  (with-temp-buffer
+    (insert-file-contents index-file)
+    (org-mode)
+    (goto-char (point-min))
+    (when (re-search-forward (format "^#\\+%s:" (upcase property)) nil t)
+      (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
+
+(defun org-invoice--read-contract-property (index-file property)
+  "Read a PROPERTY from the Contract Details heading in INDEX-FILE."
+  (with-temp-buffer
+    (insert-file-contents index-file)
+    (org-mode)
+    (goto-char (point-min))
+    (when (re-search-forward "^\\* Contract Details" nil t)
+      (org-entry-get (point) property))))
+
+(defun org-invoice--next-invoice-number (index-file)
+  "Get the next invoice number from INDEX-FILE and increment it."
+  (let* ((next-num (string-to-number
+                    (or (org-invoice--read-index-property index-file "NEXT_INVOICE_NUM")
+                        "1")))
+         (year (format-time-string "%Y"))
+         (fmt org-invoice-number-format)
+         (invoice-number (replace-regexp-in-string
+                          "%Y" year
+                          (replace-regexp-in-string
+                           "%0?[0-9]*d"
+                           (lambda (match)
+                             (format match next-num))
+                           fmt))))
+    ;; Increment the counter in the index file
+    (with-current-buffer (find-file-noselect index-file)
+      (goto-char (point-min))
+      (if (re-search-forward "^#\\+NEXT_INVOICE_NUM:.*$" nil t)
+          (replace-match (format "#+NEXT_INVOICE_NUM: %d" (1+ next-num)))
+        (goto-char (point-max))
+        (insert (format "\n#+NEXT_INVOICE_NUM: %d" (1+ next-num))))
+      (save-buffer))
+    invoice-number))
+
+(defun org-invoice--list-contracts ()
+  "Return a list of (name . slug) for all contracts."
+  (let ((root (org-invoice--ensure-root))
+        contracts)
+    (dolist (dir (directory-files root t "^[^.]"))
+      (when (and (file-directory-p dir)
+                 (file-exists-p (expand-file-name "index.org" dir)))
+        (let* ((index (expand-file-name "index.org" dir))
+               (name (or (org-invoice--read-index-property index "TITLE")
+                         (file-name-nondirectory dir))))
+          (push (cons name (file-name-nondirectory dir)) contracts))))
+    (nreverse contracts)))
+
+(defun org-invoice--select-contract ()
+  "Prompt user to select a contract.  Return (name . slug)."
+  (let ((contracts (org-invoice--list-contracts)))
+    (unless contracts
+      (user-error "No contracts found. Create one with `org-invoice-new-contract'"))
+    (let* ((names (mapcar #'car contracts))
+           (choice (completing-read "Select contract: " names nil t)))
+      (assoc choice contracts))))
+
+(defun org-invoice--compute-totals (hours rate tax-rate)
+  "Compute subtotal, tax, and total from HOURS, RATE, and TAX-RATE."
+  (let* ((subtotal (* hours rate))
+         (tax (* subtotal (/ tax-rate 100.0)))
+         (total (+ subtotal tax)))
+    (list :subtotal subtotal :tax tax :total total)))
+
+(defun org-invoice--format-date (time)
+  "Format TIME using `org-invoice-date-format'."
+  (format-time-string org-invoice-date-format time))
+
+(defun org-invoice--add-to-index (index-file invoice-number invoice-file
+                                             period-start period-end total status)
+  "Add an invoice entry to INDEX-FILE."
+  (with-current-buffer (find-file-noselect index-file)
+    (goto-char (point-min))
+    (unless (re-search-forward "^\\* Invoices" nil t)
+      (goto-char (point-max))
+      (insert "\n* Invoices\n"))
+    ;; Go to end of Invoices section
+    (org-end-of-subtree t)
+    (insert (format "\n** %s
+:PROPERTIES:
+:INVOICE_FILE: [[file:%s][%s]]
+:PERIOD_START: %s
+:PERIOD_END: %s
+:TOTAL: %.2f
+:STATUS: %s
+:DATE_CREATED: %s
+:END:\n"
+                    invoice-number
+                    (file-name-nondirectory invoice-file)
+                    invoice-number
+                    period-start
+                    period-end
+                    total
+                    status
+                    (format-time-string "[%Y-%m-%d %a]")))
+    (save-buffer)))
+
+;;; Interactive Commands
+
+;;;###autoload
+(defun org-invoice-new-contract ()
+  "Create a new contract with client details."
+  (interactive)
+  (let* ((client-name (read-string "Client/Company name: "))
+         (client-address (read-string "Client address: "))
+         (client-email (read-string "Client email: "))
+         (contact-name (read-string "Contact person (or RET to skip): "))
+         (service-desc (read-string "Service description (e.g., Software Development Services): "
+                                    "Software Development Services"))
+         (rate (read-number "Hourly rate: "))
+         (currency (read-string "Currency code: " org-invoice-default-currency))
+         (currency-sym (read-string "Currency symbol: " org-invoice-default-currency-symbol))
+         (tax-rate (read-number "Tax rate (%): " org-invoice-default-tax-rate))
+         (tax-label (read-string "Tax label: " org-invoice-default-tax-label))
+         (payment-terms (read-string "Payment terms: " org-invoice-default-payment-terms))
+         (slug (org-invoice--slugify client-name))
+         (contract-dir (org-invoice--contract-dir slug))
+         (index-file (org-invoice--index-file slug)))
+    (when (file-exists-p index-file)
+      (user-error "Contract '%s' already exists at %s" client-name contract-dir))
+    (make-directory contract-dir t)
+    (with-temp-file index-file
+      (insert (format "#+TITLE: %s
+#+NEXT_INVOICE_NUM: 1
+
+* Contract Details
+:PROPERTIES:
+:CLIENT_NAME: %s
+:CLIENT_ADDRESS: %s
+:CLIENT_EMAIL: %s
+:CONTACT_NAME: %s
+:SERVICE_DESCRIPTION: %s
+:RATE: %.2f
+:CURRENCY: %s
+:CURRENCY_SYMBOL: %s
+:TAX_RATE: %.2f
+:TAX_LABEL: %s
+:PAYMENT_TERMS: %s
+:END:
+
+* Invoices
+"
+                      client-name
+                      client-name
+                      client-address
+                      client-email
+                      (if (string-empty-p contact-name) client-name contact-name)
+                      service-desc
+                      rate
+                      currency
+                      currency-sym
+                      tax-rate
+                      tax-label
+                      payment-terms)))
+    (find-file index-file)
+    (message "Contract created for '%s' at %s" client-name contract-dir)))
+
+;;;###autoload
+(defun org-invoice-create ()
+  "Create a new invoice for a contract."
+  (interactive)
+  (let* ((contract (org-invoice--select-contract))
+         (slug (cdr contract))
+         (index-file (org-invoice--index-file slug))
+         ;; Read contract properties
+         (client-name (org-invoice--read-contract-property index-file "CLIENT_NAME"))
+         (client-address (org-invoice--read-contract-property index-file "CLIENT_ADDRESS"))
+         (client-email (org-invoice--read-contract-property index-file "CLIENT_EMAIL"))
+         (contact-name (org-invoice--read-contract-property index-file "CONTACT_NAME"))
+         (service-desc (org-invoice--read-contract-property index-file "SERVICE_DESCRIPTION"))
+         (rate (string-to-number (org-invoice--read-contract-property index-file "RATE")))
+         (currency (or (org-invoice--read-contract-property index-file "CURRENCY")
+                       org-invoice-default-currency))
+         (currency-sym (or (org-invoice--read-contract-property index-file "CURRENCY_SYMBOL")
+                           org-invoice-default-currency-symbol))
+         (tax-rate (string-to-number
+                    (or (org-invoice--read-contract-property index-file "TAX_RATE")
+                        (number-to-string org-invoice-default-tax-rate))))
+         (tax-label (or (org-invoice--read-contract-property index-file "TAX_LABEL")
+                        org-invoice-default-tax-label))
+         (payment-terms (or (org-invoice--read-contract-property index-file "PAYMENT_TERMS")
+                            org-invoice-default-payment-terms))
+         ;; Prompt for variable fields
+         (hours (read-number "Hours worked: "))
+         (period-start (org-read-date nil nil nil "Period start: "))
+         (period-end (org-read-date nil nil nil "Period end: "))
+         ;; Compute
+         (totals (org-invoice--compute-totals hours rate tax-rate))
+         (subtotal (plist-get totals :subtotal))
+         (tax (plist-get totals :tax))
+         (total (plist-get totals :total))
+         ;; Invoice number and file
+         (invoice-number (org-invoice--next-invoice-number index-file))
+         (invoice-file (expand-file-name
+                        (concat invoice-number ".org")
+                        (org-invoice--contract-dir slug)))
+         (invoice-date (org-invoice--format-date (current-time)))
+         (due-date (org-invoice--format-date
+                    (time-add (current-time)
+                              (days-to-time
+                               (cond
+                                ((string-match "Net \\([0-9]+\\)" payment-terms)
+                                 (string-to-number (match-string 1 payment-terms)))
+                                ((string-match-p "Due on Receipt" payment-terms) 0)
+                                (t 30)))))))
+    ;; Create the invoice org file
+    (with-temp-file invoice-file
+      (insert (format "#+TITLE: Invoice %s
+#+INVOICE_NUMBER: %s
+#+INVOICE_DATE: %s
+#+DUE_DATE: %s
+#+STATUS: Unpaid
+
+* Invoice Details
+:PROPERTIES:
+:INVOICE_NUMBER: %s
+:INVOICE_DATE: %s
+:DUE_DATE: %s
+:PERIOD_START: %s
+:PERIOD_END: %s
+:PAYMENT_TERMS: %s
+:STATUS: Unpaid
+:END:
+
+** From
+| Field   | Value                        |
+|---------+------------------------------|
+| Name    | %s |
+| Company | %s |
+| Address | %s |
+| Email   | %s |
+| Phone   | %s |
+
+** To
+| Field   | Value                        |
+|---------+------------------------------|
+| Name    | %s |
+| Company | %s |
+| Address | %s |
+| Email   | %s |
+| Contact | %s |
+
+** Line Items
+| # | Description | Hours | Rate (%s) | Amount (%s) |
+|---+-------------+-------+-----------+-------------|
+| 1 | %s | %.2f | %.2f | %.2f |
+|---+-------------+-------+-----------+-------------|
+|   | *Subtotal*  |       |           | *%.2f* |
+|   | *%s (%s%%)*  |       |           | *%.2f* |
+|   | *TOTAL (%s)* |       |           | *%.2f* |
+
+** Invoice Period
+%s to %s
+
+** Payment Terms
+%s
+"
+                      invoice-number
+                      invoice-number
+                      invoice-date
+                      due-date
+                      ;; Properties
+                      invoice-number
+                      invoice-date
+                      due-date
+                      period-start
+                      period-end
+                      payment-terms
+                      ;; From
+                      org-invoice-from-name
+                      org-invoice-from-company
+                      org-invoice-from-address
+                      org-invoice-from-email
+                      org-invoice-from-phone
+                      ;; To
+                      contact-name
+                      client-name
+                      client-address
+                      client-email
+                      contact-name
+                      ;; Line items
+                      currency-sym currency-sym
+                      service-desc hours rate subtotal
+                      subtotal
+                      tax-label (format "%.1f" tax-rate) tax
+                      currency total
+                      ;; Period
+                      period-start period-end
+                      ;; Terms
+                      payment-terms)))
+    ;; Update the index
+    (org-invoice--add-to-index index-file invoice-number invoice-file
+                               period-start period-end total "Unpaid")
+    ;; Open the invoice
+    (find-file invoice-file)
+    (message "Invoice %s created (Total: %s%.2f)" invoice-number currency-sym total)))
+
+;;;###autoload
+(defun org-invoice-mark-paid ()
+  "Mark the current invoice buffer as paid."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an Org buffer"))
+  (save-excursion
+    ;; Update status in file keyword
+    (goto-char (point-min))
+    (when (re-search-forward "^#\\+STATUS:.*$" nil t)
+      (replace-match "#+STATUS: Paid"))
+    ;; Update status in properties
+    (goto-char (point-min))
+    (when (re-search-forward "^\\* Invoice Details" nil t)
+      (org-entry-put (point) "STATUS" "Paid")
+      (org-entry-put (point) "PAID_DATE" (format-time-string "[%Y-%m-%d %a]")))
+    (save-buffer))
+  ;; Also update the index file if we can find it
+  (let* ((invoice-file (buffer-file-name))
+         (invoice-dir (file-name-directory invoice-file))
+         (index-file (expand-file-name "index.org" invoice-dir))
+         (invoice-number (save-excursion
+                           (goto-char (point-min))
+                           (when (re-search-forward "^#\\+INVOICE_NUMBER: \\(.+\\)$" nil t)
+                             (match-string 1)))))
+    (when (and (file-exists-p index-file) invoice-number)
+      (with-current-buffer (find-file-noselect index-file)
+        (goto-char (point-min))
+        (when (re-search-forward (format "^\\*\\* %s" (regexp-quote invoice-number)) nil t)
+          (org-entry-put (point) "STATUS" "Paid")
+          (org-entry-put (point) "PAID_DATE" (format-time-string "[%Y-%m-%d %a]")))
+        (save-buffer))))
+  (message "Invoice marked as paid."))
+
+;;;###autoload
+(defun org-invoice-open-contract ()
+  "Open the index file for a contract."
+  (interactive)
+  (let* ((contract (org-invoice--select-contract))
+         (slug (cdr contract))
+         (index-file (org-invoice--index-file slug)))
+    (find-file index-file)))
+
+;;;###autoload
+(defun org-invoice-list-unpaid ()
+  "List all unpaid invoices across all contracts."
+  (interactive)
+  (let ((contracts (org-invoice--list-contracts))
+        (unpaid-list '()))
+    (dolist (contract contracts)
+      (let* ((slug (cdr contract))
+             (contract-dir (org-invoice--contract-dir slug)))
+        (dolist (file (directory-files contract-dir t "\\.org$"))
+          (unless (string= (file-name-nondirectory file) "index.org")
+            (with-temp-buffer
+              (insert-file-contents file)
+              (when (re-search-forward "^#\\+STATUS: Unpaid" nil t)
+                (goto-char (point-min))
+                (let ((inv-num (when (re-search-forward "^#\\+INVOICE_NUMBER: \\(.+\\)$" nil t)
+                                 (match-string 1)))
+                      (inv-total (progn
+                                   (goto-char (point-min))
+                                   (when (re-search-forward "^#\\+DUE_DATE: \\(.+\\)$" nil t)
+                                     (match-string 1)))))
+                  (push (list (car contract) inv-num inv-total file) unpaid-list))))))))
+    (if (null unpaid-list)
+        (message "No unpaid invoices found.")
+      (let ((buf (get-buffer-create "*Org Invoice - Unpaid*")))
+        (with-current-buffer buf
+          (read-only-mode -1)
+          (erase-buffer)
+          (insert "Unpaid Invoices\n")
+          (insert (make-string 60 ?=) "\n\n")
+          (dolist (inv unpaid-list)
+            (insert (format "%-25s  %-15s  Due: %s\n  %s\n\n"
+                            (nth 0 inv) (nth 1 inv) (nth 2 inv) (nth 3 inv))))
+          (goto-char (point-min))
+          (read-only-mode 1))
+        (display-buffer buf)))))
+
+(provide 'org-invoice)
+;;; org-invoice.el ends here
